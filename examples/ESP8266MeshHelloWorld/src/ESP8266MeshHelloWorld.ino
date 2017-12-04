@@ -1,5 +1,4 @@
 #include "credentials.h"
-#include <ESP8266WiFi.h>
 #include <ESP8266MQTTMesh.h>
 #include <FS.h>
 
@@ -22,7 +21,11 @@ bool         mqtt_secure      = MQTT_SECURE;
 bool         mesh_secure      = MESH_SECURE;
 #endif
 
+#ifdef ESP32
+String ID  = String((unsigned long)ESP.getEfuseMac());
+#else
 String ID  = String(ESP.getChipId());
+#endif
 
 
 

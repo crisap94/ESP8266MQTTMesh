@@ -17,17 +17,21 @@
 
 #include "ESP8266MQTTMesh.h"
 
+#include <limits.h>
 
 #include "Base64.h"
-#include "eboot_command.h"
+#include "SPIFFS_compat.h"
 
-#include <limits.h>
+#if HAS_OTA
+#include "eboot_command.h"
 extern "C" {
   #include "user_interface.h"
   extern uint32_t _SPIFFS_start;
 }
+#endif
 
-#ifndef pgm_read_with_offset //Requires Arduino core 2.4.0
+
+#if !defined(ESP32) && ! defined(pgm_read_with_offset) //Requires Arduino core 2.4.0
     #error "This version of the ESP8266 library is not supported"
 #endif
 
@@ -174,9 +178,10 @@ void ESP8266MQTTMesh::begin() {
         die();
       }
     }
-    Dir dir = SPIFFS.openDir("/bssid/");
-    while(dir.next()) {
-      dbgPrintln(EMMDBG_FS, " ==> '" + dir.fileName() + "'");
+    _DIR dir;
+    _opendir(dir, "/bssid/");
+    while(_nextdir(dir)) {
+      dbgPrintln(EMMDBG_FS, " ==> '" + _dirname(dir) + "'");
     }
     WiFi.disconnect();
     // In the ESP8266 2.3.0 API, there seems to be a bug which prevents a node configured as
@@ -184,11 +189,7 @@ void ESP8266MQTTMesh::begin() {
     // in WIFI_AP_STA
     WiFi.mode(WIFI_STA);
 
-    wifiConnectHandler     = WiFi.onStationModeGotIP(            [this] (const WiFiEventStationModeGotIP& e) {                this->onWifiConnect(e);    }); 
-    wifiDisconnectHandler  = WiFi.onStationModeDisconnected(     [this] (const WiFiEventStationModeDisconnected& e) {         this->onWifiDisconnect(e); });
-    //wifiDHCPTimeoutHandler = WiFi.onStationModeDHCPTimeout(      [this] () {                                                  this->onDHCPTimeout();     });
-    wifiAPConnectHandler   = WiFi.onSoftAPModeStationConnected(  [this] (const WiFiEventSoftAPModeStationConnected& ip) {     this->onAPConnect(ip);     });
-    wifiAPDisconnectHandler= WiFi.onSoftAPModeStationDisconnected([this] (const WiFiEventSoftAPModeStationDisconnected& ip) { this->onAPDisconnect(ip);  });
+    this->connectWiFiEvents();
 
     espClient[0]->setNoDelay(true);
     espClient[0]->onConnect(   [this](void * arg, AsyncClient *c)                           { this->onConnect(c);         }, this);
@@ -235,7 +236,70 @@ void ESP8266MQTTMesh::begin() {
     connect();
 }
 
-bool ESP8266MQTTMesh::isAPConnected(uint8 *mac) {
+#ifdef USE_WIFI_ONEVENT
+static ESP8266MQTTMesh *meshPtr;
+
+void staticWiFiEventHandler(system_event_id_t event, system_event_info_t info)
+{
+    meshPtr->WiFiEventHandler(event, info);
+}
+
+void ESP8266MQTTMesh::WiFiEventHandler(system_event_id_t event, system_event_info_t info)
+{
+    switch(event) {
+    case SYSTEM_EVENT_STA_GOT_IP:
+    {
+        struct WiFiEventStationModeGotIP e;
+        e.ip = info.got_ip.ip_info.ip.addr;
+        e.mask = info.got_ip.ip_info.netmask.addr;
+        e.gw = info.got_ip.ip_info.gw.addr;
+        this->onWifiConnect(e);
+        break;
+    }
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+    {
+        struct WiFiEventStationModeDisconnected e;
+        e.ssid.reserve(info.disconnected.ssid_len+1);
+        for(int i = 0; i < info.disconnected.ssid_len; i++) {
+            e.ssid += (char)info.disconnected.ssid[i];
+        }
+        memcpy(e.bssid, info.disconnected.bssid, 6);
+        e.reason = info.disconnected.reason;
+        this->onWifiDisconnect(e);
+        break;
+    }
+    case SYSTEM_EVENT_AP_STACONNECTED:
+    {
+        this->onAPConnect(info.sta_connected);
+        break;
+    }
+    case SYSTEM_EVENT_AP_STADISCONNECTED:
+        this->onAPDisconnect(info.sta_disconnected);
+        break;
+    }
+}
+
+void ESP8266MQTTMesh::connectWiFiEvents()
+{
+    meshPtr = this;
+    WiFi.onEvent(&staticWiFiEventHandler);
+}
+#else
+void ESP8266MQTTMesh::connectWiFiEvents()
+{
+    //wifiConnectHandler =
+        WiFi.onStationModeGotIP(            [this] (const WiFiEventStationModeGotIP& e) {                this->onWifiConnect(e);    }); 
+    //wifiDisconnectHandler =
+        WiFi.onStationModeDisconnected(     [this] (const WiFiEventStationModeDisconnected& e) {         this->onWifiDisconnect(e); });
+    //wifiDHCPTimeoutHandler =
+    //    WiFi.onStationModeDHCPTimeout(      [this] () {                                                  this->onDHCPTimeout();     });
+    //wifiAPConnectHandler =
+        WiFi.onSoftAPModeStationConnected(  [this] (const WiFiEventSoftAPModeStationConnected& ip) {     this->onAPConnect(ip);     });
+    //wifiAPDisconnectHandler =
+        WiFi.onSoftAPModeStationDisconnected([this] (const WiFiEventSoftAPModeStationDisconnected& ip) { this->onAPDisconnect(ip);  });
+}
+#endif
+bool ESP8266MQTTMesh::isAPConnected(uint8_t *mac) {
     struct station_info *station_list = wifi_softap_get_station_info();
     while (station_list != NULL) {
         if(memcmp(mac, station_list->bssid, 6) == 0) {

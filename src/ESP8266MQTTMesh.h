@@ -4,7 +4,7 @@
 #if ! defined(MQTT_MAX_PACKET_SIZE)
     #define MQTT_MAX_PACKET_SIZE 1152
 #endif
-#if  ! defined(ESP8266MESHMQTT_DISABLE_OTA)
+#if  ! defined(ESP8266MESHMQTT_DISABLE_OTA) && ! defined(ESP32)
     //By default we support OTA
     #if ! defined(MQTT_MAX_PACKET_SIZE) || MQTT_MAX_PACKET_SIZE < (1024+128)
         #error "Must define MQTT_MAX_PACKET_SIZE >= 1152"
@@ -15,10 +15,18 @@
 #endif
 
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
-#include <ESPAsyncTCP.h>
+#ifdef ESP32
+  #include <AsyncTCP.h>
+  #include <ESP32Ticker.h>
+  #define USE_WIFI_ONEVENT
+  #include "WiFiCompat.h"
+#else
+  #include <ESP8266WiFi.h>
+  #include <ESPAsyncTCP.h>
+  #include <Ticker.h>
+#endif
+
 #include <AsyncMqttClient.h>
-#include <Ticker.h>
 #include <FS.h>
 #include <functional>
 
@@ -87,7 +95,7 @@ private:
 #endif
     AsyncServer     espServer;
     AsyncClient     *espClient[ESP8266_NUM_CLIENTS+1] = {0};
-    uint8           espMAC[ESP8266_NUM_CLIENTS+1][6];
+    uint8_t         espMAC[ESP8266_NUM_CLIENTS+1][6];
     AsyncMqttClient mqttClient;
 
     Ticker schedule;
@@ -133,18 +141,19 @@ private:
     void handle_ota(const char *cmd, const char *msg);
     ota_info_t parse_ota_info(const char *str);
     bool check_ota_md5();
-    bool isAPConnected(uint8 *mac);
-    void getMAC(IPAddress ip, uint8 *mac);
+    bool isAPConnected(uint8_t *mac);
+    void getMAC(IPAddress ip, uint8_t *mac);
     void assign_subdomain();
     static void assign_subdomain(ESP8266MQTTMesh *e) { e->assign_subdomain(); };
     void erase_sector();
     static void erase_sector(ESP8266MQTTMesh *e) { e->erase_sector(); };
 
-    WiFiEventHandler wifiConnectHandler;
-    WiFiEventHandler wifiDisconnectHandler;
+    void connectWiFiEvents();
+    //WiFiEventHandler wifiConnectHandler;
+    //WiFiEventHandler wifiDisconnectHandler;
     //WiFiEventHandler wifiDHCPTimeoutHandler;
-    WiFiEventHandler wifiAPConnectHandler;
-    WiFiEventHandler wifiAPDisconnectHandler;
+    //WiFiEventHandler wifiAPConnectHandler;
+    //WiFiEventHandler wifiAPDisconnectHandler;
 
     void onWifiConnect(const WiFiEventStationModeGotIP& event);
     void onWifiDisconnect(const WiFiEventStationModeDisconnected& event);
@@ -194,6 +203,9 @@ public:
     void publish(const char *subtopic, const char *msg);
     bool connected();
     static bool keyValue(const char *data, char separator, char *key, int keylen, const char **value);
+#ifdef USE_WIFI_ONEVENT
+    void WiFiEventHandler(system_event_id_t event, system_event_info_t info);
+#endif
 };
 
 #include "ESP8266MQTTMeshBuilder.h"

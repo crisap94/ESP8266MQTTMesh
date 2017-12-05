@@ -53,6 +53,12 @@
   #define ESP8266_NUM_CLIENTS 4
 #endif
 
+#ifdef ESP32
+  #define _chipID ((unsigned long)ESP.getEfuseMac())
+#else
+  #define _chipID ESP.getChipId()
+#endif
+
 typedef struct {
     unsigned int len;
     byte         md5[16];
@@ -141,8 +147,8 @@ private:
     void handle_ota(const char *cmd, const char *msg);
     ota_info_t parse_ota_info(const char *str);
     bool check_ota_md5();
-    bool isAPConnected(uint8_t *mac);
-    void getMAC(IPAddress ip, uint8_t *mac);
+    //bool isAPConnected(uint8_t *mac);
+    //void getMAC(IPAddress ip, uint8_t *mac);
     void assign_subdomain();
     static void assign_subdomain(ESP8266MQTTMesh *e) { e->assign_subdomain(); };
     void erase_sector();

@@ -42,7 +42,7 @@ enum {
 
 //Define GATEWAY_ID to the value of ESP.getChipId() in order to prevent only a specific node from connecting via MQTT
 #ifdef GATEWAY_ID
-    #define IS_GATEWAY (ESP.getChipId() == GATEWAY_ID)
+    #define IS_GATEWAY (_chipID == GATEWAY_ID)
 #else
     #define IS_GATEWAY (1)
 #endif
@@ -170,6 +170,7 @@ void ESP8266MQTTMesh::begin() {
 #if HAS_OTA
     dbgPrintln(EMMDBG_MSG_EXTRA, "OTA Start: 0x" + String(freeSpaceStart, HEX) + " OTA End: 0x" + String(freeSpaceEnd, HEX));
 #endif
+    _initFS();
     if (! SPIFFS.begin()) {
       dbgPrintln(EMMDBG_MSG_EXTRA, "Formatting FS");
       SPIFFS.format();
@@ -299,6 +300,7 @@ void ESP8266MQTTMesh::connectWiFiEvents()
         WiFi.onSoftAPModeStationDisconnected([this] (const WiFiEventSoftAPModeStationDisconnected& ip) { this->onAPDisconnect(ip);  });
 }
 #endif
+#if 0
 bool ESP8266MQTTMesh::isAPConnected(uint8_t *mac) {
     struct station_info *station_list = wifi_softap_get_station_info();
     while (station_list != NULL) {
@@ -309,7 +311,6 @@ bool ESP8266MQTTMesh::isAPConnected(uint8_t *mac) {
     }
     return false;
 }
-
 void ESP8266MQTTMesh::getMAC(IPAddress ip, uint8 *mac) {
     struct station_info *station_list = wifi_softap_get_station_info();
     while (station_list != NULL) {
@@ -321,6 +322,7 @@ void ESP8266MQTTMesh::getMAC(IPAddress ip, uint8 *mac) {
     }
     memset(mac, 0, 6);
 }
+#endif
 
 bool ESP8266MQTTMesh::connected() {
     return wifiConnected() && ((meshConnect && espClient[0] && espClient[0]->connected()) || mqttClient.connected());
@@ -376,6 +378,7 @@ void ESP8266MQTTMesh::scan() {
                 dbgPrintln(EMMDBG_WIFI, "Did not match SSID list");
                 continue;
             }
+#if 0
             if (0) {
                 FSInfo fs_info;
                 SPIFFS.info(fs_info);
@@ -387,6 +390,7 @@ void ESP8266MQTTMesh::scan() {
                     }
                 }
             }
+#endif
         } else {
             if (! match_bssid(WiFi.BSSIDstr(i).c_str())) {
                 dbgPrintln(EMMDBG_WIFI, "Failed to match BSSID");
@@ -618,18 +622,20 @@ void ESP8266MQTTMesh::assign_subdomain() {
         return;
     }
     memset(seen, 0, sizeof(seen));
-    Dir dir = SPIFFS.openDir("/bssid/");
-    while(dir.next()) {
-      int value = read_subdomain(dir.fileName().c_str());
+    _DIR dir;
+    _opendir(dir, "/bssid/");
+    while(_nextdir(dir)) {
+      int value = read_subdomain(_dirname(dir).c_str());
       if (value == -1) {
           continue;
       }
-      dbgPrintln(EMMDBG_WIFI_EXTRA, "Mapping " + dir.fileName() + " to " + String(value) + " ");
+      dbgPrintln(EMMDBG_WIFI_EXTRA, "Mapping " + _dirname(dir) + " to " + String(value) + " ");
       seen[value] = 1;
     }
     for (int i = 4; i < 256; i++) {
         if (! seen[i]) {
-            File f = SPIFFS.open("/bssid/" +  WiFi.softAPmacAddress(), "w");
+            File f;
+            f = SPIFFS.open("/bssid/" +  WiFi.softAPmacAddress(), "w");
             if (! f) {
                 dbgPrintln(EMMDBG_MSG, "Couldn't write "  + WiFi.softAPmacAddress());
                 die();
@@ -674,18 +680,19 @@ void ESP8266MQTTMesh::broadcast_message(const char *topicOrMsg, const char *msg)
 }
 
 void ESP8266MQTTMesh::send_bssids(int idx) {
-    Dir dir = SPIFFS.openDir("/bssid/");
+    _DIR dir;
     char msg[TOPIC_LEN];
     char subdomainStr[4];
-    while(dir.next()) {
-        int subdomain = read_subdomain(dir.fileName().c_str());
+    _opendir(dir, "/bssid/");
+    while(_nextdir(dir)) {
+        int subdomain = read_subdomain(_dirname(dir).c_str());
         if (subdomain == -1) {
             continue;
         }
         itoa(subdomain, subdomainStr, 10);
         strlcpy(msg, inTopic, sizeof(msg));
         strlcat(msg, "bssid/", sizeof(msg));
-        strlcat(msg, dir.fileName().substring(7).c_str(), sizeof(msg)); // bssid
+        strlcat(msg, _dirname(dir).substring(7).c_str(), sizeof(msg)); // bssid
         strlcat(msg, "=", sizeof(msg));
         strlcat(msg, subdomainStr, sizeof(msg));
         send_message(idx, msg);
@@ -747,7 +754,7 @@ void ESP8266MQTTMesh::get_fw_string(char *msg, int len, const char *prefix)
     }
     strlcat(msg, "ChipID: ", len);
     strlcat(msg, "ChipID: 0x", len);
-    itoa(ESP.getChipId(), id, 16);
+    itoa(_chipID, id, 16);
     strlcat(msg, id, len);
     strlcat(msg, " FW: 0x", len);
     itoa(firmware_id, id, 16);
@@ -770,6 +777,7 @@ void ESP8266MQTTMesh::handle_fw(const char *cmd) {
     publish("fw", msg);
 }
 
+#if HAS_OTA
 ota_info_t ESP8266MQTTMesh::parse_ota_info(const char *str) {
     ota_info_t ota_info;
     memset (&ota_info, 0, sizeof(ota_info));
@@ -949,6 +957,7 @@ void ESP8266MQTTMesh::handle_ota(const char *cmd, const char *msg) {
         }
     }
 }
+#endif
 
 void ESP8266MQTTMesh::onWifiConnect(const WiFiEventStationModeGotIP& event) {
     if (meshConnect) {

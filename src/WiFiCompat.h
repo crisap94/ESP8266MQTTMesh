@@ -4,6 +4,7 @@
 
 #include <WiFi.h>
 
+#define WIFI_DISCONNECT_REASON_ASSOC_TOOMANY WIFI_REASON_ASSOC_TOOMANY 
 struct WiFiEventStationModeGotIP
 {
     IPAddress ip;
